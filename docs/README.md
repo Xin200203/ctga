@@ -17,3 +17,4 @@
 4. [docs/实验设计/阶段实验与指标.md](/Users/xin/Code/research/ctga/docs/实验设计/阶段实验与指标.md)
 5. [docs/项目管理/开发清单.md](/Users/xin/Code/research/ctga/docs/项目管理/开发清单.md)
 6. [docs/项目管理/实现执行清单.md](/Users/xin/Code/research/ctga/docs/项目管理/实现执行清单.md)
+7. [docs/项目管理/GitHub首发材料.md](/Users/xin/Code/research/ctga/docs/项目管理/GitHub首发材料.md)
