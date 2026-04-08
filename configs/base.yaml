@@ -1,0 +1,15 @@
+project:
+  name: ctga
+  output_root: ./outputs
+
+runtime:
+  seed: 42
+  device: cuda
+
+data:
+  root: ./data
+  cache_root: ./cache
+
+ablation:
+  use_graph1: true
+  use_graph2: true

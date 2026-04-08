@@ -1,0 +1,11 @@
+defaults:
+  - base.yaml
+
+train:
+  stage: layer2
+  batch_size: 1
+  num_workers: 4
+
+model:
+  solver_mode: beam_qap
+  topk_candidates: 5

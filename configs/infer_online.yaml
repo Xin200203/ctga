@@ -1,0 +1,10 @@
+defaults:
+  - base.yaml
+
+infer:
+  mode: online
+  save_debug_packet: true
+
+model:
+  graph1_solver: gasp
+  solver_mode: beam_qap

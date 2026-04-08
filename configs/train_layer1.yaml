@@ -1,0 +1,11 @@
+defaults:
+  - base.yaml
+
+train:
+  stage: layer1
+  batch_size: 1
+  num_workers: 4
+
+model:
+  use_hetero_mp: false
+  graph1_solver: gasp
