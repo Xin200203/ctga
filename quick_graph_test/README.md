@@ -67,8 +67,29 @@ The current history term is intentionally conservative:
 - track support is gated by current-frame locality
 - distant fragments are not allowed to merge only because they resemble the same track
 
-Tasks 5+ remain stubbed with explicit interfaces so development can continue in
-the order defined by the 12h plan.
+Task 5 is implemented:
+
+- unary current-to-memory association in [assoc_l2.py](/Users/xin/Code/research/ctga/quick_graph_test/src/assoc_l2.py)
+- candidate gating + Hungarian / greedy fallback
+- `score_matrix.png`
+- `layer2_assignment_overlay.png`
+- `layer2_meta.json`
+
+Task 6 is implemented:
+
+- GT-based over-seg sample mining in [sample_mining.py](/Users/xin/Code/research/ctga/quick_graph_test/src/sample_mining.py)
+- per-frame GT fragmentation records: `frame_records.jsonl`
+- mined sample index: `samples_index.json`
+- per-sample metadata under `samples/sample_xxx/meta.json`
+
+Current Task 6 validation status:
+
+- remote 184 smoke run on `scene0000_00` first `80` sampled frames completed
+- yielded `3` candidates:
+  - `1` `split_fixed`
+  - `2` `wrong_merge`
+
+Tasks 7+ still remain to be completed in the order defined by the 12h plan.
 
 ## Current Entry Point
 
@@ -110,4 +131,13 @@ python -m quick_graph_test.src.run_quick_test \
   --cache-masks /path/to/mask_cache \
   --frame-index 5 \
   --history-frames 5
+```
+
+```bash
+# Task 6: mine GT-based over-seg samples
+python -m quick_graph_test.src.sample_mining \
+  --scene-root /path/to/scene \
+  --intrinsic-path /path/to/intrinsic.txt \
+  --cache-masks /path/to/mask_cache \
+  --out-dir /path/to/out_sample_mining
 ```

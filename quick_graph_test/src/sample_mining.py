@@ -434,7 +434,7 @@ class SampleMiner:
                 )
 
             if (sample_index + 1) % 20 == 0 or sample_index + 1 == num_frames:
-                print(f"[sample_mining] processed {sample_index + 1}/{num_frames} sampled frames")
+                print(f"[sample_mining] processed {sample_index + 1}/{num_frames} sampled frames", flush=True)
 
         candidates = self._build_candidates(frame_records)
         return {
@@ -593,15 +593,15 @@ def main() -> None:
         candidates=result["candidates"],
     )
 
-    print("Task 6 sample mining complete:")
-    print(f"  scene_id: {scene_root.name}")
-    print(f"  num_processed_frames: {result['num_processed_frames']}")
-    print(f"  num_frame_records: {len(result['frame_records'])}")
-    print(f"  num_candidates: {len(result['candidates'])}")
-    print(f"  frame_records: {outputs['frame_records']}")
-    print(f"  samples_index: {outputs['samples_index']}")
-    print(f"  summary: {outputs['summary']}")
-    print(f"  samples_root: {outputs['samples_root']}")
+    print("Task 6 sample mining complete:", flush=True)
+    print(f"  scene_id: {scene_root.name}", flush=True)
+    print(f"  num_processed_frames: {result['num_processed_frames']}", flush=True)
+    print(f"  num_frame_records: {len(result['frame_records'])}", flush=True)
+    print(f"  num_candidates: {len(result['candidates'])}", flush=True)
+    print(f"  frame_records: {outputs['frame_records']}", flush=True)
+    print(f"  samples_index: {outputs['samples_index']}", flush=True)
+    print(f"  summary: {outputs['summary']}", flush=True)
+    print(f"  samples_root: {outputs['samples_root']}", flush=True)
 
 
 if __name__ == "__main__":
