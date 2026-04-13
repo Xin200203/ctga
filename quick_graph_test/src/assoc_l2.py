@@ -65,6 +65,7 @@ class UnaryAssocConfig:
     gating_max_size_ratio: float = 8.00
     top_k: int = 5
     match_thresh: float = 0.18
+    support_override_min_score: float = 0.22
 
 
 @dataclass
@@ -113,29 +114,31 @@ class UnaryAssociator:
         track_id_to_col = {track.track_id: idx for idx, track in enumerate(active_tracks)}
 
         for obj_idx, current_object in enumerate(current_objects):
-            valid_cols: list[int] = []
             raw_scores: list[tuple[float, int]] = []
+            support_track_ids = set(int(track_id) for track_id in current_object.support_track_ids)
             for track_idx, track in enumerate(active_tracks):
                 geom = self._geom_score(current_object, track)
                 app = _color_similarity(object_colors[obj_idx], track.feat_color_mean, self.cfg.app_color_sigma)
-                hist = 1.0 if int(track.track_id) in set(current_object.support_track_ids) else 0.0
+                hist = 1.0 if int(track.track_id) in support_track_ids else 0.0
                 score = (
                     self.cfg.unary_weight_geom * geom
                     + self.cfg.unary_weight_app * app
                     + self.cfg.unary_weight_hist * hist
                 )
                 score_matrix[obj_idx, track_idx] = float(score)
-                if self._passes_gating(current_object, track):
-                    valid_cols.append(track_idx)
+                keep = self._passes_gating(current_object, track)
+                if (not keep) and int(track.track_id) in support_track_ids and score >= self.cfg.support_override_min_score:
+                    keep = True
+                if keep:
                     raw_scores.append((float(score), track_idx))
 
             raw_scores.sort(key=lambda item: item[0], reverse=True)
             for _, track_idx in raw_scores[: max(int(self.cfg.top_k), 0)]:
                 candidate_mask[obj_idx, track_idx] = True
 
-            for support_track_id in current_object.support_track_ids:
+            for support_track_id in support_track_ids:
                 track_idx = track_id_to_col.get(int(support_track_id))
-                if track_idx is not None and self._passes_gating(current_object, active_tracks[track_idx]):
+                if track_idx is not None and score_matrix[obj_idx, track_idx] >= self.cfg.support_override_min_score:
                     candidate_mask[obj_idx, track_idx] = True
 
             # If top-k was empty but a gated track exists, keep the best gated one.
