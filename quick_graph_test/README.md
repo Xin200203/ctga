@@ -89,7 +89,27 @@ Current Task 6 validation status:
   - `1` `split_fixed`
   - `2` `wrong_merge`
 
-Tasks 7+ still remain to be completed in the order defined by the 12h plan.
+Task 7 is implemented:
+
+- sample strip rendering in [render_samples.py](/Users/xin/Code/research/ctga/quick_graph_test/src/render_samples.py)
+- per-sample `strip.png`
+- per-sample `score_matrix.png`
+- per-sample `gallery_tile.png`
+- gallery outputs:
+  - `success_grid.png`
+  - `fail_grid.png`
+  - `merge_error_grid.png`
+
+Task 8 is implemented:
+
+- final summary generation in [summarize_task8.py](/Users/xin/Code/research/ctga/quick_graph_test/src/summarize_task8.py)
+- `summary.txt`
+- `summary.json`
+- explicit error attribution from:
+  - Task 6 sample mining
+  - Task 7 sample strips / galleries
+  - GT layer-1 diagnostics
+  - reference Layer-2 unary run
 
 ## Current Entry Point
 
