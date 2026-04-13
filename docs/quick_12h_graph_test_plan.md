@@ -240,9 +240,9 @@ class CurrentObject:
 
 ### `MP` 分数（建议）
 
-\[
+$$
 a_{ij}^{MP} = 0.4\cdot cover + 0.3\cdot contain + 0.2\cdot depth\_cons + 0.1\cdot color\_sim
-\]
+$$
 
 其中：
 - `cover`：primitive 投影像素有多少比例在 mask 内
@@ -252,9 +252,9 @@ a_{ij}^{MP} = 0.4\cdot cover + 0.3\cdot contain + 0.2\cdot depth\_cons + 0.1\cdo
 
 ### `PP` 分数（建议）
 
-\[
+$$
 a_{jj'}^{PP} = 0.5\cdot adj + 0.3\cdot normal\_sim + 0.2\cdot color\_sim
-\]
+$$
 
 其中：
 - `adj`：3D 邻接 / bbox 接触
@@ -263,9 +263,9 @@ a_{jj'}^{PP} = 0.5\cdot adj + 0.3\cdot normal\_sim + 0.2\cdot color\_sim
 
 ### `PT` 分数（建议）
 
-\[
+$$
 a_{jk}^{PT} = 0.5\cdot vote + 0.3\cdot bbox\_iou - 0.2\cdot center\_dist
-\]
+$$
 
 其中：
 - `vote`：primitive 的 voxel 落入 track 支持区域附近的比例
@@ -274,13 +274,13 @@ a_{jk}^{PT} = 0.5\cdot vote + 0.3\cdot bbox\_iou - 0.2\cdot center\_dist
 
 ### signed primitive graph 组装
 
-\[
+$$
 W_{jj'}^+ = \lambda_{pp} a_{jj'}^{PP} + \lambda_m \sum_i a_{ij}^{MP} a_{ij'}^{MP} + \lambda_t \sum_k a_{jk}^{PT} a_{j'k}^{PT}
-\]
+$$
 
-\[
+$$
 W_{jj'}^- = \lambda_c \cdot track\_conflict(j,j') + \lambda_u \cdot mask\_conflict(j,j')
-\]
+$$
 
 ### 12h 求解器建议
 先不要上复杂 multicut：
@@ -307,9 +307,9 @@ W_{jj'}^- = \lambda_c \cdot track\_conflict(j,j') + \lambda_u \cdot mask\_confli
 
 ### unary 分数
 
-\[
+$$
 \theta_{rk} = 0.5\cdot geom + 0.3\cdot app + 0.2\cdot hist
-\]
+$$
 
 其中：
 - `geom`：bbox overlap / center distance / voxel vote
@@ -382,9 +382,9 @@ GT 只用于：
 
 对于 GT instance `g` 在帧 `t`：
 
-\[
+$$
 S_{frag}(g,t) = \#\{p_j \mid p_j \text{ overlaps GT instance } g\}
-\]
+$$
 
 也就是：
 - 某个 GT 实例在当前帧被多少个 primitive 覆盖
