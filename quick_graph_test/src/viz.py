@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .common_types import FramePacket, Mask2D, Primitive3D
+from .common_types import CurrentObject, FramePacket, Mask2D, Primitive3D, TrackState
 from .geometry import rotation_matrix_xyz
 
 
@@ -276,4 +276,203 @@ def export_task2_primitives(
         "primitive_overlay_2d": str(overlay_path),
         "primitive_cloud_3d": str(cloud_path),
         "primitive_meta": str(meta_path),
+    }
+
+
+def _cluster_color(cluster_id: int, support_track_ids: list[int]) -> np.ndarray:
+    if support_track_ids:
+        return _id_color(10000 + int(support_track_ids[0]))
+    return _id_color(5000 + int(cluster_id))
+
+
+def overlay_layer1_clusters(
+    rgb: np.ndarray,
+    primitives: list[Primitive3D],
+    cluster_ids: np.ndarray,
+    current_objects: list[CurrentObject],
+) -> np.ndarray:
+    canvas = rgb.astype(np.float32).copy()
+    h, w = rgb.shape[:2]
+    object_lookup = {int(obj.obj_id_local): obj for obj in current_objects}
+    cluster_areas: dict[int, int] = {}
+    for prim_idx, primitive in enumerate(primitives):
+        cluster_id = int(cluster_ids[prim_idx]) if prim_idx < len(cluster_ids) else -1
+        cluster_areas[cluster_id] = cluster_areas.get(cluster_id, 0) + int(primitive.pixel_idx.shape[0])
+    topk_clusters = {cluster_id for cluster_id, _ in sorted(cluster_areas.items(), key=lambda item: -item[1])[:15]}
+
+    image = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), mode="RGB")
+    draw = ImageDraw.Draw(image)
+    for prim_idx, primitive in enumerate(primitives):
+        coords = primitive.pixel_idx.astype(np.int32)
+        if coords.size == 0:
+            continue
+        cluster_id = int(cluster_ids[prim_idx]) if prim_idx < len(cluster_ids) else -1
+        current_object = object_lookup.get(cluster_id)
+        support_track_ids = current_object.support_track_ids if current_object is not None else []
+        color = _cluster_color(cluster_id, support_track_ids).astype(np.float32)
+        ys = np.clip(coords[:, 0], 0, h - 1)
+        xs = np.clip(coords[:, 1], 0, w - 1)
+        canvas_np = np.asarray(image, dtype=np.float32)
+        canvas_np[ys, xs] = 0.50 * canvas_np[ys, xs] + 0.50 * color
+        image = Image.fromarray(np.clip(canvas_np, 0, 255).astype(np.uint8), mode="RGB")
+        draw = ImageDraw.Draw(image)
+
+    for cluster_id in topk_clusters:
+        coords_list = [primitives[idx].pixel_idx for idx in range(len(primitives)) if int(cluster_ids[idx]) == cluster_id]
+        if not coords_list:
+            continue
+        coords = np.concatenate(coords_list, axis=0)
+        cx = int(np.clip(coords[:, 1].mean(), 0, w - 1))
+        cy = int(np.clip(coords[:, 0].mean(), 0, h - 1))
+        x0, y0 = int(coords[:, 1].min()), int(coords[:, 0].min())
+        x1, y1 = int(coords[:, 1].max()) + 1, int(coords[:, 0].max()) + 1
+        current_object = object_lookup.get(cluster_id)
+        support_track_ids = current_object.support_track_ids if current_object is not None else []
+        color = tuple(int(v) for v in _cluster_color(cluster_id, support_track_ids).tolist())
+        label = f"c{cluster_id}"
+        if support_track_ids:
+            label += f"|t{support_track_ids[0]}"
+        draw.rectangle([x0, y0, x1 - 1, y1 - 1], outline=color, width=2)
+        draw.text((cx + 2, cy + 2), label, fill=color)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def render_layer1_cloud(
+    primitives: list[Primitive3D],
+    cluster_ids: np.ndarray,
+    current_objects: list[CurrentObject],
+    size: tuple[int, int] = (960, 720),
+) -> np.ndarray:
+    width, height = size
+    canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    canvas[:] = np.array([20, 20, 24], dtype=np.uint8)
+    if not primitives:
+        return canvas
+
+    object_lookup = {int(obj.obj_id_local): obj for obj in current_objects}
+    xyz_list = []
+    color_list = []
+    center_list = []
+    center_color_list = []
+    label_ids = []
+    cluster_sizes: dict[int, int] = {}
+    for prim_idx, primitive in enumerate(primitives):
+        cluster_id = int(cluster_ids[prim_idx]) if prim_idx < len(cluster_ids) else -1
+        cluster_sizes[cluster_id] = cluster_sizes.get(cluster_id, 0) + int(primitive.pixel_idx.shape[0])
+        xyz = primitive.xyz.astype(np.float32)
+        if xyz.size == 0:
+            continue
+        current_object = object_lookup.get(cluster_id)
+        support_track_ids = current_object.support_track_ids if current_object is not None else []
+        color = _cluster_color(cluster_id, support_track_ids)
+        xyz_list.append(xyz)
+        color_list.append(np.repeat(color[None, :], xyz.shape[0], axis=0))
+
+    if not xyz_list:
+        return canvas
+
+    topk_clusters = {cluster_id for cluster_id, _ in sorted(cluster_sizes.items(), key=lambda item: -item[1])[:15]}
+    for cluster_id in sorted(topk_clusters):
+        cluster_xyz = np.concatenate(
+            [primitives[idx].xyz for idx in range(len(primitives)) if int(cluster_ids[idx]) == cluster_id and primitives[idx].xyz.size > 0],
+            axis=0,
+        )
+        if cluster_xyz.size == 0:
+            continue
+        current_object = object_lookup.get(cluster_id)
+        support_track_ids = current_object.support_track_ids if current_object is not None else []
+        center_list.append(cluster_xyz.mean(axis=0).astype(np.float32))
+        center_color_list.append(_cluster_color(cluster_id, support_track_ids))
+        label_ids.append(cluster_id)
+
+    points = np.concatenate(xyz_list, axis=0)
+    colors = np.concatenate(color_list, axis=0)
+    pivot = points.mean(axis=0, keepdims=True)
+    rot = rotation_matrix_xyz(rx_deg=18.0, ry_deg=-35.0, rz_deg=0.0)
+    rotated = (points - pivot) @ rot.T
+
+    xy = rotated[:, :2]
+    min_xy = xy.min(axis=0)
+    max_xy = xy.max(axis=0)
+    span = np.maximum(max_xy - min_xy, 1e-6)
+    scale = 0.82 * min(width / span[0], height / span[1])
+    offset = np.array([width / 2.0, height / 2.0], dtype=np.float32)
+    proj = (xy - (min_xy + max_xy) / 2.0) * scale + offset
+    proj[:, 1] = height - proj[:, 1]
+
+    image = Image.fromarray(canvas, mode="RGB")
+    draw = ImageDraw.Draw(image)
+    for idx in np.argsort(rotated[:, 2]):
+        x, y = proj[idx]
+        if x < 1 or x >= width - 1 or y < 1 or y >= height - 1:
+            continue
+        draw.ellipse([x - 1.5, y - 1.5, x + 1.5, y + 1.5], fill=tuple(int(v) for v in colors[idx].tolist()))
+
+    if center_list:
+        centers = np.stack(center_list, axis=0)
+        center_colors = np.stack(center_color_list, axis=0)
+        rotated_centers = (centers - pivot) @ rot.T
+        proj_centers = (rotated_centers[:, :2] - (min_xy + max_xy) / 2.0) * scale + offset
+        proj_centers[:, 1] = height - proj_centers[:, 1]
+        for label_idx, center_xy in enumerate(proj_centers):
+            x, y = center_xy
+            color = tuple(int(v) for v in center_colors[label_idx].tolist())
+            cluster_id = label_ids[label_idx]
+            current_object = object_lookup.get(cluster_id)
+            support_track_ids = current_object.support_track_ids if current_object is not None else []
+            label = f"c{cluster_id}"
+            if support_track_ids:
+                label += f"|t{support_track_ids[0]}"
+            draw.ellipse([x - 4, y - 4, x + 4, y + 4], fill=(255, 255, 255), outline=color, width=2)
+            draw.text((x + 5, y + 5), label, fill=color)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def export_task34_layer1(
+    frame: FramePacket,
+    primitives: list[Primitive3D],
+    cluster_ids: np.ndarray,
+    current_objects: list[CurrentObject],
+    active_tracks: list[TrackState],
+    out_dir: str | Path,
+) -> dict[str, str]:
+    out_path = ensure_dir(out_dir)
+    overlay_path = out_path / "layer1_clusters_overlay.png"
+    cloud_path = out_path / "layer1_clusters_3d.png"
+    meta_path = out_path / "layer1_meta.json"
+
+    overlay = overlay_layer1_clusters(frame.rgb.astype(np.uint8), primitives, cluster_ids, current_objects)
+    cloud = render_layer1_cloud(primitives, cluster_ids, current_objects)
+    save_rgb(overlay_path, overlay)
+    save_rgb(cloud_path, cloud)
+
+    cluster_sizes = [len(obj.primitive_ids) for obj in current_objects]
+    track_hist: dict[str, int] = {}
+    for obj in current_objects:
+        for track_id in obj.support_track_ids:
+            key = str(track_id)
+            track_hist[key] = track_hist.get(key, 0) + 1
+
+    meta = {
+        "scene_id": frame.scene_id,
+        "frame_id": frame.frame_id,
+        "num_primitives": len(primitives),
+        "num_clusters": len(current_objects),
+        "num_active_tracks": len(active_tracks),
+        "cluster_size_stats": {
+            "min": int(min(cluster_sizes)) if cluster_sizes else 0,
+            "max": int(max(cluster_sizes)) if cluster_sizes else 0,
+            "mean": float(np.mean(cluster_sizes)) if cluster_sizes else 0.0,
+        },
+        "support_track_histogram": track_hist,
+        "outputs": {
+            "layer1_clusters_overlay": str(overlay_path),
+            "layer1_clusters_3d": str(cloud_path),
+        },
+    }
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "layer1_clusters_overlay": str(overlay_path),
+        "layer1_clusters_3d": str(cloud_path),
+        "layer1_meta": str(meta_path),
     }
