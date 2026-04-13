@@ -52,13 +52,25 @@ class CacheMaskSource(BaseMaskSource):
 
     def load_masks(self, scene_id: str, frame_id: int, image_shape: tuple[int, int] | None = None) -> list[Mask2D]:
         frame_stem = f"frame_{frame_id:06d}"
+        numeric_stem = str(frame_id)
         candidates = [
+            self.cache_root / f"{numeric_stem}.pt",
+            self.cache_root / f"{numeric_stem}.npz",
+            self.cache_root / frame_stem,
             self.cache_root / scene_id / f"{frame_stem}_masks.pt",
             self.cache_root / scene_id / f"{frame_stem}.pt",
             self.cache_root / scene_id / f"{frame_stem}_masks.npz",
             self.cache_root / scene_id / f"{frame_stem}.npz",
+            self.cache_root / scene_id / f"{numeric_stem}.pt",
+            self.cache_root / scene_id / f"{numeric_stem}.npz",
+            self.cache_root / scene_id / "fastsam_masks" / f"{numeric_stem}.pt",
+            self.cache_root / scene_id / "fastsam_masks" / f"{numeric_stem}.npz",
+            self.cache_root / scene_id / "sam_masks" / f"{numeric_stem}.pt",
+            self.cache_root / scene_id / "sam_masks" / f"{numeric_stem}.npz",
             self.cache_root / "masks" / scene_id / f"{frame_stem}_masks.pt",
             self.cache_root / "masks" / scene_id / f"{frame_stem}_masks.npz",
+            self.cache_root / "masks" / scene_id / f"{numeric_stem}.pt",
+            self.cache_root / "masks" / scene_id / f"{numeric_stem}.npz",
         ]
         for path in candidates:
             if not path.exists():
@@ -93,14 +105,16 @@ class CacheMaskSource(BaseMaskSource):
 
         scores = payload["scores"] if "scores" in payload else np.ones(len(bitmaps), dtype=np.float32)
         feats = payload["feat2d"] if "feat2d" in payload else None
+        boxes = payload["boxes"] if "boxes" in payload else None
         masks: list[Mask2D] = []
         for idx, bitmap in enumerate(bitmaps):
             bitmap = _as_numpy(bitmap).astype(bool)
+            bbox = _as_numpy(boxes[idx]).astype(np.float32) if boxes is not None else _bbox_from_bitmap(bitmap)
             masks.append(
                 Mask2D(
                     mask_id=idx,
                     bitmap=bitmap,
-                    bbox_xyxy=_bbox_from_bitmap(bitmap),
+                    bbox_xyxy=bbox,
                     area=int(bitmap.sum()),
                     score=float(scores[idx]),
                     feat2d=_as_numpy(feats[idx]).astype(np.float32) if feats is not None else None,

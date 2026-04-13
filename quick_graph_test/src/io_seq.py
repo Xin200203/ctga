@@ -28,6 +28,7 @@ class PosedRGBDSequence:
         interval: int = 1,
         depth_scale: float = 1000.0,
         scene_id: str | None = None,
+        intrinsic_path: str | Path | None = None,
     ) -> None:
         self.scene_root = Path(scene_root)
         self.interval = max(int(interval), 1)
@@ -40,11 +41,12 @@ class PosedRGBDSequence:
         if not (self.color_files and self.depth_files and self.pose_files):
             raise FileNotFoundError(
                 f"Expected color/depth/pose folders under {self.scene_root}, but one or more are missing."
-            )
+        )
 
         self.length = min(len(self.color_files), len(self.depth_files), len(self.pose_files))
         self.indices = list(range(0, self.length, self.interval))
-        self.K = self._load_intrinsic(self.scene_root / "intrinsic.txt")
+        intrinsic_file = Path(intrinsic_path).resolve() if intrinsic_path is not None else (self.scene_root / "intrinsic.txt")
+        self.K = self._load_intrinsic(intrinsic_file)
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -68,6 +70,16 @@ class PosedRGBDSequence:
             yield self[index]
 
     def _load_intrinsic(self, path: Path) -> np.ndarray:
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Could not find intrinsic file: {path}. "
+                "Use --intrinsic-path to point to intrinsic.txt or a ScanNet scene metadata .txt file."
+            )
+
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "fx_depth" in text or "fx_color" in text:
+            return self._load_scannet_metadata_intrinsic(text, path)
+
         matrix = np.loadtxt(path, dtype=np.float32)
         matrix = matrix.reshape(-1, matrix.shape[-1])
         if matrix.shape == (3, 3):
@@ -75,6 +87,33 @@ class PosedRGBDSequence:
         if matrix.shape[0] >= 3 and matrix.shape[1] >= 3:
             return matrix[:3, :3]
         raise ValueError(f"Unsupported intrinsic shape at {path}: {matrix.shape}")
+
+    def _load_scannet_metadata_intrinsic(self, text: str, path: Path) -> np.ndarray:
+        entries: dict[str, float] = {}
+        for raw_line in text.splitlines():
+            if "=" not in raw_line:
+                continue
+            key, value = raw_line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            try:
+                entries[key] = float(value)
+            except ValueError:
+                continue
+
+        keys = ("fx_depth", "fy_depth", "mx_depth", "my_depth")
+        missing = [key for key in keys if key not in entries]
+        if missing:
+            raise ValueError(f"Missing ScanNet intrinsic fields at {path}: {missing}")
+
+        return np.array(
+            [
+                [entries["fx_depth"], 0.0, entries["mx_depth"]],
+                [0.0, entries["fy_depth"], entries["my_depth"]],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
 
     def _load_color(self, path: Path) -> np.ndarray:
         return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)

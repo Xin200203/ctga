@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-masks", default=None, help="Mask cache root used when --mask-mode cache")
     parser.add_argument("--mask-mode", default="cache", choices=["cache", "empty", "oracle"])
     parser.add_argument("--gt-root", default=None, help="GT root used when --mask-mode oracle")
+    parser.add_argument("--intrinsic-path", default=None, help="Optional intrinsic file or ScanNet scene metadata .txt")
     parser.add_argument("--frame-index", type=int, default=0, help="Dataset index within the sampled sequence")
     parser.add_argument("--interval", type=int, default=1)
     parser.add_argument("--depth-scale", type=float, default=1000.0)
@@ -50,6 +51,7 @@ def main() -> None:
         scene_root=scene_root,
         interval=args.interval,
         depth_scale=args.depth_scale,
+        intrinsic_path=args.intrinsic_path,
     )
     if args.frame_index < 0 or args.frame_index >= len(sequence):
         raise IndexError(f"--frame-index {args.frame_index} is out of range for sequence length {len(sequence)}")

@@ -42,6 +42,7 @@ in the order defined by the 12h plan.
 ```bash
 python -m quick_graph_test.src.run_quick_test \
   --scene-root /path/to/scene \
+  --intrinsic-path /path/to/intrinsic.txt \
   --mask-mode cache \
   --cache-masks /path/to/mask_cache
 ```
