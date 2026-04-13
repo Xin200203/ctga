@@ -58,32 +58,43 @@ class QuickTrackBank:
         current_objects: list[CurrentObject],
         primitives: list[Primitive3D],
         frame_id: int,
+        assignments: dict[int, int] | None = None,
+        match_scores: dict[int, float] | None = None,
     ) -> dict[str, object]:
         primitive_lookup = {primitive.prim_id: primitive for primitive in primitives}
         active_tracks = self.query_active()
-        candidate_pairs: list[tuple[float, int, int]] = []
-        for obj_idx, current_object in enumerate(current_objects):
-            for track_idx, track in enumerate(active_tracks):
-                score = self._match_score(current_object, track)
-                if score >= self.cfg.match_thresh:
-                    candidate_pairs.append((score, obj_idx, track_idx))
-        candidate_pairs.sort(key=lambda item: item[0], reverse=True)
+        if assignments is None:
+            candidate_pairs: list[tuple[float, int, int]] = []
+            for obj_idx, current_object in enumerate(current_objects):
+                for track_idx, track in enumerate(active_tracks):
+                    score = self._match_score(current_object, track)
+                    if score >= self.cfg.match_thresh:
+                        candidate_pairs.append((score, obj_idx, track_idx))
+            candidate_pairs.sort(key=lambda item: item[0], reverse=True)
 
-        matched_objects: set[int] = set()
-        matched_tracks: set[int] = set()
-        assignments: dict[int, int] = {}
-        match_scores: dict[int, float] = {}
-        for score, obj_idx, track_idx in candidate_pairs:
-            if obj_idx in matched_objects or track_idx in matched_tracks:
-                continue
-            matched_objects.add(obj_idx)
-            matched_tracks.add(track_idx)
-            track_id = active_tracks[track_idx].track_id
-            assignments[obj_idx] = track_id
-            match_scores[obj_idx] = float(score)
+            matched_objects: set[int] = set()
+            matched_tracks: set[int] = set()
+            resolved_assignments: dict[int, int] = {}
+            resolved_match_scores: dict[int, float] = {}
+            for score, obj_idx, track_idx in candidate_pairs:
+                if obj_idx in matched_objects or track_idx in matched_tracks:
+                    continue
+                matched_objects.add(obj_idx)
+                matched_tracks.add(track_idx)
+                track_id = active_tracks[track_idx].track_id
+                resolved_assignments[obj_idx] = track_id
+                resolved_match_scores[obj_idx] = float(score)
+            assignments = resolved_assignments
+            match_scores = resolved_match_scores
+        else:
+            assignments = {int(obj_idx): int(track_id) for obj_idx, track_id in assignments.items()}
+            match_scores = {
+                int(obj_idx): float(score)
+                for obj_idx, score in (match_scores or {}).items()
+            }
 
         new_active: dict[int, TrackState] = {}
-        matched_track_ids = {active_tracks[idx].track_id for idx in matched_tracks}
+        matched_track_ids = set(assignments.values())
         for obj_idx, current_object in enumerate(current_objects):
             track_id = assignments.get(obj_idx)
             confidence = match_scores.get(obj_idx, 0.55)

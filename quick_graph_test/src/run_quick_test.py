@@ -13,13 +13,14 @@ from pathlib import Path
 
 import numpy as np
 
+from .assoc_l2 import UnaryAssocConfig, UnaryAssociator
 from .cluster_l1 import Layer1ClusterConfig, Layer1Clusterer
 from .io_seq import PosedRGBDSequence
 from .mask_source import build_mask_source
 from .primitive_build import PrimitiveBuilder, PrimitiveConfig
 from .score_l1 import Layer1Config, Layer1Scorer
 from .track_bank import QuickTrackBank
-from .viz import export_task1_overlays, export_task2_primitives, export_task34_layer1
+from .viz import export_task1_overlays, export_task2_primitives, export_task34_layer1, export_task5_assoc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--voxel-size", type=float, default=0.05)
     parser.add_argument("--layer1-merge-thresh", type=float, default=0.12)
     parser.add_argument("--layer1-negative-veto", type=float, default=0.70)
+    parser.add_argument("--assoc-top-k", type=int, default=5)
+    parser.add_argument("--assoc-match-thresh", type=float, default=0.18)
     return parser
 
 
@@ -89,6 +92,12 @@ def main() -> None:
             negative_veto_thresh=args.layer1_negative_veto,
         )
     )
+    unary_associator = UnaryAssociator(
+        UnaryAssocConfig(
+            top_k=args.assoc_top_k,
+            match_thresh=args.assoc_match_thresh,
+        )
+    )
     track_bank = QuickTrackBank()
 
     start_index = max(0, args.frame_index - max(int(args.history_frames), 0))
@@ -98,6 +107,7 @@ def main() -> None:
     final_cluster_ids = np.zeros((0,), dtype=np.int32)
     final_current_objects = []
     final_active_tracks = []
+    final_assoc_result = None
     final_outputs: dict[str, str] = {}
     final_track_update: dict[str, object] = {}
 
@@ -113,6 +123,11 @@ def main() -> None:
             masks=masks,
             active_tracks=active_tracks,
         )
+        assoc_result = unary_associator.match(
+            current_objects=current_objects,
+            active_tracks=active_tracks,
+            primitives=primitives,
+        )
 
         if sample_index == args.frame_index:
             final_frame = frame
@@ -121,6 +136,7 @@ def main() -> None:
             final_cluster_ids = cluster_ids
             final_current_objects = current_objects
             final_active_tracks = active_tracks
+            final_assoc_result = assoc_result
             frame_out_dir = out_root / "single_frame" / frame.scene_id / f"frame_{frame.frame_id:06d}"
             final_outputs.update(export_task1_overlays(frame, masks, frame_out_dir))
             final_outputs.update(export_task2_primitives(frame, primitives, frame_out_dir))
@@ -134,22 +150,38 @@ def main() -> None:
                     out_dir=frame_out_dir,
                 )
             )
+            final_outputs.update(
+                export_task5_assoc(
+                    frame=frame,
+                    primitives=primitives,
+                    current_objects=current_objects,
+                    active_tracks=active_tracks,
+                    assoc_result=assoc_result,
+                    out_dir=frame_out_dir,
+                )
+            )
 
         final_track_update = track_bank.update_from_current_objects(
             current_objects=current_objects,
             primitives=primitives,
             frame_id=frame.frame_id,
+            assignments=assoc_result.assigned_track_ids,
+            match_scores=assoc_result.match_scores,
         )
 
     if final_frame is None:
         raise RuntimeError("No frame was processed.")
+    if final_assoc_result is None:
+        raise RuntimeError("No association result was produced.")
 
-    print("Task 1 / Task 4 export complete:")
+    print("Task 1 / Task 5 export complete:")
     print(f"  history_frames: {args.history_frames}")
     print(f"  num_masks: {len(final_masks)}")
     print(f"  num_primitives: {len(final_primitives)}")
     print(f"  num_clusters: {len(final_current_objects)}")
     print(f"  num_active_tracks_before_update: {len(final_active_tracks)}")
+    print(f"  layer2_solver: {final_assoc_result.solver}")
+    print(f"  num_layer2_matches: {len(final_assoc_result.assigned_track_ids)}")
     print(f"  track_update_summary: {final_track_update}")
     for key, value in final_outputs.items():
         print(f"  {key}: {value}")

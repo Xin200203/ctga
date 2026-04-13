@@ -476,3 +476,180 @@ def export_task34_layer1(
         "layer1_clusters_3d": str(cloud_path),
         "layer1_meta": str(meta_path),
     }
+
+
+def _track_color(track_id: int) -> np.ndarray:
+    return _id_color(20000 + int(track_id))
+
+
+def overlay_layer2_assignments(
+    rgb: np.ndarray,
+    primitives: list[Primitive3D],
+    current_objects: list[CurrentObject],
+    active_tracks: list[TrackState],
+    assoc_result,
+) -> np.ndarray:
+    canvas = rgb.astype(np.float32).copy()
+    h, w = rgb.shape[:2]
+    object_lookup = {int(obj.obj_id_local): obj for obj in current_objects}
+    primitive_lookup = {primitive.prim_id: primitive for primitive in primitives}
+    assigned_track_ids = getattr(assoc_result, "assigned_track_ids", {})
+    track_lookup = {int(track.track_id): track for track in active_tracks}
+
+    image = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), mode="RGB")
+    draw = ImageDraw.Draw(image)
+    for obj_idx, current_object in enumerate(current_objects):
+        track_id = assigned_track_ids.get(obj_idx)
+        if track_id is None:
+            color = np.array([250, 170, 40], dtype=np.uint8)
+            label = f"c{current_object.obj_id_local}->new"
+        else:
+            color = _track_color(track_id)
+            conf = track_lookup.get(track_id).confidence if track_id in track_lookup else 0.0
+            label = f"c{current_object.obj_id_local}->t{track_id}"
+            if conf > 0:
+                label += f" ({conf:.2f})"
+
+        coords_list = [
+            primitive_lookup[prim_id].pixel_idx
+            for prim_id in current_object.primitive_ids
+            if prim_id in primitive_lookup and primitive_lookup[prim_id].pixel_idx.size > 0
+        ]
+        if not coords_list:
+            continue
+        coords = np.concatenate(coords_list, axis=0)
+        ys = np.clip(coords[:, 0].astype(np.int32), 0, h - 1)
+        xs = np.clip(coords[:, 1].astype(np.int32), 0, w - 1)
+        canvas_np = np.asarray(image, dtype=np.float32)
+        canvas_np[ys, xs] = 0.50 * canvas_np[ys, xs] + 0.50 * color.astype(np.float32)
+        image = Image.fromarray(np.clip(canvas_np, 0, 255).astype(np.uint8), mode="RGB")
+        draw = ImageDraw.Draw(image)
+
+        x0, y0 = int(xs.min()), int(ys.min())
+        x1, y1 = int(xs.max()) + 1, int(ys.max()) + 1
+        cx, cy = int(xs.mean()), int(ys.mean())
+        draw.rectangle([x0, y0, x1 - 1, y1 - 1], outline=tuple(int(v) for v in color.tolist()), width=2)
+        draw.text((cx + 2, cy + 2), label, fill=tuple(int(v) for v in color.tolist()))
+    return np.asarray(image, dtype=np.uint8)
+
+
+def render_score_matrix(
+    current_objects: list[CurrentObject],
+    active_tracks: list[TrackState],
+    assoc_result,
+    cell_size: int = 44,
+) -> np.ndarray:
+    num_objects = len(current_objects)
+    num_tracks = len(active_tracks)
+    score_matrix = getattr(assoc_result, "score_matrix", np.zeros((num_objects, num_tracks), dtype=np.float32))
+    candidate_mask = getattr(assoc_result, "candidate_mask", np.zeros((num_objects, num_tracks), dtype=bool))
+    assignments = getattr(assoc_result, "assignments", {})
+
+    header_h = 70
+    label_w = 90
+    width = max(label_w + max(num_tracks, 1) * cell_size + 20, 260)
+    height = max(header_h + max(num_objects, 1) * cell_size + 20, 180)
+    canvas = np.full((height, width, 3), 245, dtype=np.uint8)
+    image = Image.fromarray(canvas, mode="RGB")
+    draw = ImageDraw.Draw(image)
+
+    draw.text((12, 10), "Unary Score Matrix", fill=(20, 20, 20))
+    if num_objects == 0:
+        draw.text((12, 40), "No current objects.", fill=(100, 100, 100))
+        return np.asarray(image, dtype=np.uint8)
+    if num_tracks == 0:
+        draw.text((12, 40), "No active tracks.", fill=(100, 100, 100))
+        return np.asarray(image, dtype=np.uint8)
+
+    for track_idx, track in enumerate(active_tracks):
+        x = label_w + track_idx * cell_size
+        draw.text((x + 6, 28), f"t{track.track_id}", fill=tuple(int(v) for v in _track_color(track.track_id).tolist()))
+
+    for obj_idx, current_object in enumerate(current_objects):
+        y = header_h + obj_idx * cell_size
+        draw.text((10, y + 12), f"c{current_object.obj_id_local}", fill=(35, 35, 35))
+        for track_idx, track in enumerate(active_tracks):
+            x = label_w + track_idx * cell_size
+            score = float(score_matrix[obj_idx, track_idx]) if obj_idx < score_matrix.shape[0] and track_idx < score_matrix.shape[1] else 0.0
+            gated = bool(candidate_mask[obj_idx, track_idx]) if obj_idx < candidate_mask.shape[0] and track_idx < candidate_mask.shape[1] else False
+            if gated:
+                r = int(255 * (1.0 - score))
+                g = int(220 * score + 35)
+                b = int(80 * (1.0 - score))
+                fill = (r, g, b)
+            else:
+                fill = (220, 220, 220)
+            draw.rectangle([x, y, x + cell_size - 2, y + cell_size - 2], fill=fill, outline=(180, 180, 180), width=1)
+            text_fill = (20, 20, 20) if score < 0.65 else (255, 255, 255)
+            draw.text((x + 6, y + 12), f"{score:.2f}", fill=text_fill)
+            if assignments.get(obj_idx) == track_idx:
+                draw.rectangle([x + 1, y + 1, x + cell_size - 3, y + cell_size - 3], outline=(20, 20, 20), width=3)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def export_task5_assoc(
+    frame: FramePacket,
+    primitives: list[Primitive3D],
+    current_objects: list[CurrentObject],
+    active_tracks: list[TrackState],
+    assoc_result,
+    out_dir: str | Path,
+) -> dict[str, str]:
+    out_path = ensure_dir(out_dir)
+    overlay_path = out_path / "layer2_assignment_overlay.png"
+    matrix_path = out_path / "score_matrix.png"
+    meta_path = out_path / "layer2_meta.json"
+
+    overlay = overlay_layer2_assignments(
+        rgb=frame.rgb.astype(np.uint8),
+        primitives=primitives,
+        current_objects=current_objects,
+        active_tracks=active_tracks,
+        assoc_result=assoc_result,
+    )
+    matrix = render_score_matrix(
+        current_objects=current_objects,
+        active_tracks=active_tracks,
+        assoc_result=assoc_result,
+    )
+    save_rgb(overlay_path, overlay)
+    save_rgb(matrix_path, matrix)
+
+    matched_pairs = []
+    for obj_idx, track_id in getattr(assoc_result, "assigned_track_ids", {}).items():
+        matched_pairs.append(
+            {
+                "obj_id_local": int(current_objects[obj_idx].obj_id_local),
+                "track_id": int(track_id),
+                "score": float(getattr(assoc_result, "match_scores", {}).get(obj_idx, 0.0)),
+            }
+        )
+    meta = {
+        "scene_id": frame.scene_id,
+        "frame_id": frame.frame_id,
+        "num_current_objects": len(current_objects),
+        "num_active_tracks": len(active_tracks),
+        "num_matches": len(matched_pairs),
+        "solver": str(getattr(assoc_result, "solver", "none")),
+        "matched_pairs": matched_pairs,
+        "unmatched_objects": [
+            int(current_objects[obj_idx].obj_id_local)
+            for obj_idx in getattr(assoc_result, "unmatched_object_indices", [])
+            if obj_idx < len(current_objects)
+        ],
+        "unmatched_track_ids": [
+            int(active_tracks[track_idx].track_id)
+            for track_idx in getattr(assoc_result, "unmatched_track_indices", lambda _n: [])(len(active_tracks))
+            if track_idx < len(active_tracks)
+        ],
+        "outputs": {
+            "layer2_assignment_overlay": str(overlay_path),
+            "score_matrix": str(matrix_path),
+        },
+    }
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "layer2_assignment_overlay": str(overlay_path),
+        "score_matrix": str(matrix_path),
+        "layer2_meta": str(meta_path),
+    }
