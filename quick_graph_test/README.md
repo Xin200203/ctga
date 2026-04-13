@@ -46,8 +46,29 @@ prototype pass:
 This keeps the result in the "still over-segmented, but not visually exploded"
 range for the first Layer-1 debugging pass.
 
-Later tasks remain stubbed with explicit interfaces so development can continue
-in the order defined by the 12h plan.
+Task 3 is implemented:
+
+- hand-crafted Layer-1 `MP + PP` scoring
+- primitive clustering into current objects
+- `layer1_clusters_overlay.png`
+- `layer1_clusters_3d.png`
+- `layer1_meta.json`
+
+Task 4 is implemented:
+
+- lightweight history-aware track bank
+- `PT` support added as a local geometric prior
+- history rollout via `--history-frames N`
+- per-frame track update summary in stdout
+
+The current history term is intentionally conservative:
+
+- tracks only help merge primitives with the same strong top-track support
+- track support is gated by current-frame locality
+- distant fragments are not allowed to merge only because they resemble the same track
+
+Tasks 5+ remain stubbed with explicit interfaces so development can continue in
+the order defined by the 12h plan.
 
 ## Current Entry Point
 
@@ -56,11 +77,37 @@ python -m quick_graph_test.src.run_quick_test \
   --scene-root /path/to/scene \
   --intrinsic-path /path/to/intrinsic.txt \
   --mask-mode cache \
-  --cache-masks /path/to/mask_cache
+  --cache-masks /path/to/mask_cache \
+  --frame-index 5 \
+  --history-frames 0
 ```
 
 Outputs are written to:
 
 ```text
 quick_graph_test/out/single_frame/<scene_id>/frame_xxxxxx/
+```
+
+Useful comparison runs:
+
+```bash
+# Task 3: no history support
+python -m quick_graph_test.src.run_quick_test \
+  --scene-root /path/to/scene \
+  --intrinsic-path /path/to/intrinsic.txt \
+  --mask-mode cache \
+  --cache-masks /path/to/mask_cache \
+  --frame-index 5 \
+  --history-frames 0
+```
+
+```bash
+# Task 4: add short history support
+python -m quick_graph_test.src.run_quick_test \
+  --scene-root /path/to/scene \
+  --intrinsic-path /path/to/intrinsic.txt \
+  --mask-mode cache \
+  --cache-masks /path/to/mask_cache \
+  --frame-index 5 \
+  --history-frames 5
 ```
