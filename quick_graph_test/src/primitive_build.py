@@ -1,17 +1,18 @@
 """Single-frame primitive over-segmentation.
 
-Task 2 implements a simple pixel-grid over-segmentation using depth, normal,
-and color consistency, then lifts each connected region into 3D.
+Task 2 now uses mask-guided object-centric over-segmentation:
+- masks define candidate object support regions
+- local RGB-D consistency further splits each support region into primitive blocks
+- background surfaces outside object-like masks are not treated as primitives
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 
-from .common_types import FramePacket, Primitive3D
+from .common_types import FramePacket, Mask2D, Primitive3D
 from .geometry import bbox_from_points, estimate_normals_from_depth, unproject_depth, voxelize
 
 
@@ -27,17 +28,30 @@ class PrimitiveConfig:
     voxel_size: float = 0.05
     max_points_per_primitive: int = 4096
     max_primitives: int = 4096
+    use_mask_guidance: bool = True
+    mask_min_pixels: int = 512
+    mask_min_score: float = 0.15
+    mask_max_area_ratio: float = 0.18
+    duplicate_iou_threshold: float = 0.75
+    duplicate_contain_threshold: float = 0.97
 
 
 class PrimitiveBuilder:
     def __init__(self, cfg: PrimitiveConfig | None = None) -> None:
         self.cfg = cfg or PrimitiveConfig()
 
-    def build(self, frame: FramePacket) -> list[Primitive3D]:
+    def build(self, frame: FramePacket, masks: list[Mask2D] | None = None) -> list[Primitive3D]:
         depth = frame.depth.astype(np.float32)
         rgb = frame.rgb.astype(np.uint8)
-        valid = (depth > self.cfg.min_depth) & (depth < self.cfg.max_depth)
+        valid_depth = (depth > self.cfg.min_depth) & (depth < self.cfg.max_depth)
         normals, normal_valid = estimate_normals_from_depth(depth, frame.K)
+        owner_map, owner_to_mask = self._build_owner_map(masks or [], valid_depth)
+        if self.cfg.use_mask_guidance:
+            if owner_map is None:
+                return []
+            valid = valid_depth & (owner_map >= 0)
+        else:
+            valid = valid_depth.copy()
 
         h, w = depth.shape
         num_pixels = h * w
@@ -78,6 +92,8 @@ class PrimitiveBuilder:
                     ny, nx = y + dy, x + dx
                     if ny < 0 or ny >= h or nx < 0 or nx >= w or not valid[ny, nx]:
                         continue
+                    if owner_map is not None and owner_map[y, x] != owner_map[ny, nx]:
+                        continue
                     if self._can_connect(
                         depth=depth,
                         rgb=rgb,
@@ -105,11 +121,6 @@ class PrimitiveBuilder:
             ys = np.array([flat // w for flat in flat_indices], dtype=np.int32)
             xs = np.array([flat % w for flat in flat_indices], dtype=np.int32)
             pixel_idx = np.stack([ys, xs], axis=1)
-            if pixel_idx.shape[0] > self.cfg.max_points_per_primitive:
-                choice = np.linspace(0, pixel_idx.shape[0] - 1, self.cfg.max_points_per_primitive).astype(np.int32)
-                pixel_idx = pixel_idx[choice]
-                ys = pixel_idx[:, 0]
-                xs = pixel_idx[:, 1]
 
             mask = np.zeros((h, w), dtype=bool)
             mask[ys, xs] = True
@@ -126,6 +137,11 @@ class PrimitiveBuilder:
                 norm = np.linalg.norm(normal_mean)
                 if norm > 1e-6:
                     normal_mean = normal_mean / norm
+            support_mask_ids: list[int] = []
+            if owner_map is not None:
+                owner_value = int(owner_map[ys[0], xs[0]])
+                if owner_value >= 0:
+                    support_mask_ids = [owner_to_mask[owner_value]]
 
             primitives.append(
                 Primitive3D(
@@ -137,12 +153,86 @@ class PrimitiveBuilder:
                     bbox_xyzxyz=bbox_from_points(xyz).astype(np.float32),
                     normal_mean=normal_mean.astype(np.float32),
                     color_mean=color_mean.astype(np.float32),
+                    support_mask_ids=support_mask_ids,
                 )
             )
             if len(primitives) >= self.cfg.max_primitives:
                 break
 
         return primitives
+
+    def _build_owner_map(
+        self,
+        masks: list[Mask2D],
+        valid_depth: np.ndarray,
+    ) -> tuple[np.ndarray | None, dict[int, int]]:
+        if not self.cfg.use_mask_guidance or not masks:
+            return None, {}
+
+        h, w = valid_depth.shape
+        selected_masks = self._select_masks(masks, image_shape=(h, w))
+        if not selected_masks:
+            return None, {}
+
+        owner_map = np.full((h, w), -1, dtype=np.int32)
+        best_score = np.full((h, w), -1e9, dtype=np.float32)
+        best_area = np.full((h, w), np.iinfo(np.int32).max, dtype=np.int32)
+        owner_to_mask: dict[int, int] = {}
+
+        for owner_id, mask in enumerate(selected_masks):
+            bitmap = mask.bitmap.astype(bool) & valid_depth
+            if not np.any(bitmap):
+                continue
+            score = float(mask.score)
+            area = int(mask.area)
+            better = bitmap & (
+                (score > best_score + 1e-6)
+                | ((np.abs(score - best_score) <= 1e-6) & (area < best_area))
+            )
+            owner_map[better] = owner_id
+            best_score[better] = score
+            best_area[better] = area
+            owner_to_mask[owner_id] = int(mask.mask_id)
+
+        if not np.any(owner_map >= 0):
+            return None, {}
+        return owner_map, owner_to_mask
+
+    def _select_masks(
+        self,
+        masks: list[Mask2D],
+        image_shape: tuple[int, int],
+    ) -> list[Mask2D]:
+        image_area = int(image_shape[0] * image_shape[1])
+        max_area = float(self.cfg.mask_max_area_ratio) * float(image_area)
+        candidates = [
+            mask
+            for mask in masks
+            if mask.area >= self.cfg.mask_min_pixels
+            and mask.area <= max_area
+            and float(mask.score) >= self.cfg.mask_min_score
+        ]
+        candidates.sort(key=lambda mask: (-float(mask.score), int(mask.area)))
+
+        selected: list[Mask2D] = []
+        for candidate in candidates:
+            keep = True
+            candidate_bitmap = candidate.bitmap.astype(bool)
+            candidate_area = max(int(candidate.area), 1)
+            for chosen in selected:
+                chosen_bitmap = chosen.bitmap.astype(bool)
+                inter = int(np.logical_and(candidate_bitmap, chosen_bitmap).sum())
+                if inter <= 0:
+                    continue
+                union = candidate_area + int(chosen.area) - inter
+                iou = inter / max(union, 1)
+                contain = inter / max(min(candidate_area, int(chosen.area)), 1)
+                if iou >= self.cfg.duplicate_iou_threshold and contain >= self.cfg.duplicate_contain_threshold:
+                    keep = False
+                    break
+            if keep:
+                selected.append(candidate)
+        return selected
 
     def _can_connect(
         self,

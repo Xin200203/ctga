@@ -78,7 +78,7 @@ def main() -> None:
             voxel_size=args.voxel_size,
         )
     )
-    primitives = primitive_builder.build(frame)
+    primitives = primitive_builder.build(frame, masks=masks)
     outputs.update(export_task2_primitives(frame, primitives, frame_out_dir))
 
     print("Task 1 / Task 2 export complete:")

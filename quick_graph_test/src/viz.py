@@ -76,6 +76,11 @@ def overlay_primitives(rgb: np.ndarray, primitives: list[Primitive3D], alpha: fl
     h, w = rgb.shape[:2]
     image = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), mode="RGB")
     draw = ImageDraw.Draw(image)
+    areas = np.array([primitive.pixel_idx.shape[0] for primitive in primitives], dtype=np.int32)
+    topk_ids: set[int] = set()
+    if areas.size > 0:
+        order = np.argsort(-areas)
+        topk_ids = {int(idx) for idx in order[: min(20, len(order))].tolist()}
     for primitive in primitives:
         color = _id_color(primitive.prim_id).astype(np.float32)
         coords = primitive.pixel_idx.astype(np.int32)
@@ -87,6 +92,8 @@ def overlay_primitives(rgb: np.ndarray, primitives: list[Primitive3D], alpha: fl
         canvas_np[ys, xs] = (1.0 - alpha) * canvas_np[ys, xs] + alpha * color
         image = Image.fromarray(np.clip(canvas_np, 0, 255).astype(np.uint8), mode="RGB")
         draw = ImageDraw.Draw(image)
+        if primitive.prim_id not in topk_ids:
+            continue
         cx = int(np.clip(coords[:, 1].mean(), 0, w - 1))
         cy = int(np.clip(coords[:, 0].mean(), 0, h - 1))
         bbox = np.array([coords[:, 1].min(), coords[:, 0].min(), coords[:, 1].max() + 1, coords[:, 0].max() + 1])
@@ -106,6 +113,12 @@ def render_primitive_cloud(primitives: list[Primitive3D], size: tuple[int, int] 
     color_list = []
     center_list = []
     center_color_list = []
+    areas = np.array([primitive.pixel_idx.shape[0] for primitive in primitives], dtype=np.int32)
+    label_ids: set[int] = set()
+    if areas.size > 0:
+        order = np.argsort(-areas)
+        label_ids = {int(idx) for idx in order[: min(20, len(order))].tolist()}
+
     for primitive in primitives:
         xyz = primitive.xyz.astype(np.float32)
         if xyz.size == 0:
@@ -152,6 +165,8 @@ def render_primitive_cloud(primitives: list[Primitive3D], size: tuple[int, int] 
         draw.ellipse([x - 1.5, y - 1.5, x + 1.5, y + 1.5], fill=color)
 
     for prim_idx, center_xy in enumerate(proj_centers):
+        if prim_idx not in label_ids:
+            continue
         x, y = center_xy
         color = tuple(int(v) for v in center_colors[prim_idx].tolist())
         draw.ellipse([x - 4, y - 4, x + 4, y + 4], fill=(255, 255, 255), outline=color, width=2)
@@ -245,6 +260,11 @@ def export_task2_primitives(
             "min": int(min(pixel_counts)) if pixel_counts else 0,
             "max": int(max(pixel_counts)) if pixel_counts else 0,
             "mean": float(np.mean(pixel_counts)) if pixel_counts else 0.0,
+        },
+        "num_mask_guided_primitives": int(sum(1 for primitive in primitives if primitive.support_mask_ids)),
+        "support_mask_histogram": {
+            str(mask_id): int(sum(1 for primitive in primitives if mask_id in primitive.support_mask_ids))
+            for mask_id in sorted({mask_id for primitive in primitives for mask_id in primitive.support_mask_ids})
         },
         "outputs": {
             "primitive_overlay_2d": str(overlay_path),

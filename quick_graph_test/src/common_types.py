@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -37,6 +37,7 @@ class Primitive3D:
     bbox_xyzxyz: np.ndarray
     normal_mean: np.ndarray
     color_mean: np.ndarray
+    support_mask_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
