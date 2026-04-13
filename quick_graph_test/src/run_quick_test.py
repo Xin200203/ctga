@@ -27,13 +27,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval", type=int, default=1)
     parser.add_argument("--depth-scale", type=float, default=1000.0)
     parser.add_argument("--out-dir", default=None, help="Output root; defaults to quick_graph_test/out")
-    parser.add_argument("--tau-z", type=float, default=0.04)
-    parser.add_argument("--tau-n-deg", type=float, default=25.0)
-    parser.add_argument("--tau-c", type=float, default=25.0)
-    parser.add_argument("--connectivity", type=int, default=4, choices=[4, 8])
+    parser.add_argument("--tau-z", type=float, default=0.05)
+    parser.add_argument("--tau-n-deg", type=float, default=30.0)
+    parser.add_argument("--tau-c", type=float, default=35.0)
+    parser.add_argument("--connectivity", type=int, default=8, choices=[4, 8])
     parser.add_argument("--min-depth", type=float, default=0.1)
     parser.add_argument("--max-depth", type=float, default=8.0)
-    parser.add_argument("--min-primitive-pixels", type=int, default=12)
+    parser.add_argument("--min-primitive-pixels", type=int, default=32)
     parser.add_argument("--voxel-size", type=float, default=0.05)
     return parser
 

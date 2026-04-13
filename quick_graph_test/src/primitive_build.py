@@ -17,13 +17,13 @@ from .geometry import bbox_from_points, estimate_normals_from_depth, unproject_d
 
 @dataclass
 class PrimitiveConfig:
-    tau_z: float = 0.04
-    tau_n_deg: float = 25.0
-    tau_c: float = 25.0
-    connectivity: int = 4
+    tau_z: float = 0.05
+    tau_n_deg: float = 30.0
+    tau_c: float = 35.0
+    connectivity: int = 8
     min_depth: float = 0.1
     max_depth: float = 8.0
-    min_pixels: int = 12
+    min_pixels: int = 32
     voxel_size: float = 0.05
     max_points_per_primitive: int = 4096
     max_primitives: int = 4096

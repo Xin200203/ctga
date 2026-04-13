@@ -34,6 +34,18 @@ Task 2 is implemented:
 - `primitive_cloud_3d.png`
 - primitive metadata export
 
+Current default primitive settings are intentionally milder than the first
+prototype pass:
+
+- `connectivity=8`
+- `tau_z=0.05`
+- `tau_n_deg=30`
+- `tau_c=35`
+- `min_pixels=32`
+
+This keeps the result in the "still over-segmented, but not visually exploded"
+range for the first Layer-1 debugging pass.
+
 Later tasks remain stubbed with explicit interfaces so development can continue
 in the order defined by the 12h plan.
 

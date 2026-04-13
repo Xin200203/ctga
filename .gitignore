@@ -19,6 +19,7 @@ data/*
 !data/.gitkeep
 third_party/*
 !third_party/.gitkeep
+quick_graph_test/out_remote/
 
 # Editor
 .DS_Store
