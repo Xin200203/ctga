@@ -32,10 +32,13 @@ class Layer1Config:
     pt_weight_center: float = 0.20
     pt_center_sigma: float = 0.60
     pt_positive_thresh: float = 0.08
+    pt_pair_gap_sigma: float = 0.12
+    pt_pair_max_gap: float = 0.25
+    pt_pair_max_center_dist: float = 1.00
 
     lambda_pp: float = 0.45
     lambda_mask: float = 0.75
-    lambda_track: float = 0.55
+    lambda_track: float = 0.35
     lambda_mask_conflict: float = 0.85
     lambda_track_conflict: float = 1.10
 
@@ -211,7 +214,19 @@ class Layer1Scorer:
         for prim_idx_a in range(num_prims):
             for prim_idx_b in range(prim_idx_a + 1, num_prims):
                 same_mask_support = float(np.dot(mp_scores[:, prim_idx_a], mp_scores[:, prim_idx_b])) if num_masks else 0.0
-                same_track_support = float(np.dot(pt_scores[prim_idx_a], pt_scores[prim_idx_b])) if num_tracks else 0.0
+                same_track_support = (
+                    self._pair_track_support(
+                        prim_idx_a=prim_idx_a,
+                        prim_idx_b=prim_idx_b,
+                        primitives=primitives,
+                        pp_score=float(pp_scores[prim_idx_a, prim_idx_b]),
+                        active_tracks=active_tracks,
+                        top_track_ids=top_track_ids,
+                        top_track_scores=top_track_scores,
+                    )
+                    if num_tracks
+                    else 0.0
+                )
                 pos = (
                     self.cfg.lambda_pp * pp_scores[prim_idx_a, prim_idx_b]
                     + self.cfg.lambda_mask * same_mask_support
@@ -307,3 +322,40 @@ class Layer1Scorer:
             return 0.0
         iou = _bbox_iou_3d(track_lookup[track_id_a].bbox_xyzxyz, track_lookup[track_id_b].bbox_xyzxyz)
         return score_a * score_b * (1.0 - iou)
+
+    def _pair_track_support(
+        self,
+        prim_idx_a: int,
+        prim_idx_b: int,
+        primitives: list[Primitive3D],
+        pp_score: float,
+        active_tracks: list[TrackState],
+        top_track_ids: np.ndarray,
+        top_track_scores: np.ndarray,
+    ) -> float:
+        if not active_tracks:
+            return 0.0
+        track_id_a = int(top_track_ids[prim_idx_a])
+        track_id_b = int(top_track_ids[prim_idx_b])
+        if track_id_a < 0 or track_id_b < 0 or track_id_a != track_id_b:
+            return 0.0
+        score_a = float(top_track_scores[prim_idx_a])
+        score_b = float(top_track_scores[prim_idx_b])
+        if score_a < self.cfg.strong_pt_thresh or score_b < self.cfg.strong_pt_thresh:
+            return 0.0
+
+        primitive_a = primitives[prim_idx_a]
+        primitive_b = primitives[prim_idx_b]
+        center_dist = float(np.linalg.norm(primitive_a.center_xyz - primitive_b.center_xyz))
+        if center_dist > self.cfg.pt_pair_max_center_dist:
+            return 0.0
+
+        gap = _bbox_gap_3d(primitive_a.bbox_xyzxyz, primitive_b.bbox_xyzxyz)
+        if gap > self.cfg.pt_pair_max_gap and pp_score < self.cfg.pp_positive_thresh:
+            return 0.0
+
+        locality = max(
+            float(pp_score),
+            float(np.exp(-gap / max(self.cfg.pt_pair_gap_sigma, 1e-6))),
+        )
+        return min(score_a, score_b) * locality
